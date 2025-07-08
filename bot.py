@@ -9,6 +9,7 @@ from discord import Intents, app_commands
 from config import DISCORD_TOKEN, BOT_PREFIX
 from database.database import init_db, AsyncSessionLocal, check_db_health
 from sqlalchemy import text
+from discord.ext.commands import cooldown, BucketType
 
 # Initialize rich
 install()
@@ -35,14 +36,10 @@ class MyBot(commands.Bot):
         )
         
     async def setup_hook(self):
-        # Sync commands to a specific guild for testing
-        TEST_GUILD_ID = 1014443771393482753  # Replace with your actual guild ID
+        TEST_GUILD_ID = 1014443771393482753
         guild = discord.Object(id=TEST_GUILD_ID)
-        
-        # Copy global commands to test guild
         self.tree.copy_global_to(guild=guild)
         
-        # Sync commands
         try:
             await self.tree.sync(guild=guild)
             logging.info(f"✅ Commands synced to test guild {TEST_GUILD_ID}")
@@ -53,6 +50,22 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
+# Error handling
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ You don't have permissions for this command")
+    else:
+        logging.error(f"Error in {ctx.command}: {error}", exc_info=True)
+        await ctx.send(f"❌ An error occurred: {str(error)}")
+
+# Activity tracking
+@bot.event
+async def on_command_completion(ctx):
+    logging.info(f"Command used: {ctx.command} by {ctx.author}")
+
 @bot.event
 async def on_ready():
     await bot.change_presence(activity=discord.Activity(
@@ -62,6 +75,7 @@ async def on_ready():
     logging.info(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
 
 @bot.hybrid_command(description="Check if the bot is responsive")
+@cooldown(1, 5, BucketType.user)
 async def ping(ctx):
     await ctx.send("pong 🏓")
 
@@ -96,10 +110,14 @@ async def serverinfo(ctx):
 async def help(ctx):
     embed = discord.Embed(
         title="Albion Raid Planner Help",
+        description="**Core Commands**\n"
+                   "`/createraid` - Schedule a new raid\n"
+                   "`/signup` - Join an existing raid\n\n"
+                   "**Utility Commands**",
         color=0x00ff00
     )
     commands_list = [
-        ("/ping", "Check if the bot is responsive"),
+        ("/ping", "Check if the bot is responsive (5s cooldown)"),
         ("/hello", "Greet the bot"),
         ("/dbcheck", "Verify database connectivity"),
         ("/version", "Show the bot version"),

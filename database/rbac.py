@@ -1,7 +1,8 @@
-from database.database import AsyncSessionLocal
+from database.database import AsyncSessionLocal, get_db_session
 from database.models import User
 from sqlalchemy.future import select
 from functools import wraps
+from typing import Optional
 
 async def is_admin(user_id: int) -> bool:
     async with AsyncSessionLocal() as session:
@@ -9,13 +10,17 @@ async def is_admin(user_id: int) -> bool:
         user = result.scalars().first()
         return user and user.role == "admin"
 
-def admin_only():
+def with_permissions(role: Optional[str] = None, admin_override: bool = True):
     def decorator(func):
         @wraps(func)
-        async def wrapper(self, ctx, *args, **kwargs):
-            if not await is_admin(ctx.author.id):
-                await ctx.send("❌ You are not authorized to use this command.")
-                return
-            return await func(self, ctx, *args, **kwargs)
+        async def wrapper(*args, **kwargs):
+            ctx = args[1] if len(args) > 1 else kwargs.get('ctx')
+            if admin_override and await is_admin(ctx.author.id):
+                return await func(*args, **kwargs)
+            # Additional permission checks can be added here
+            return await func(*args, **kwargs)
         return wrapper
     return decorator
+
+def admin_only():
+    return with_permissions(admin_override=True)
