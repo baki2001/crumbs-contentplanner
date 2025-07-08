@@ -1,7 +1,5 @@
 # Albion Raid Planner Bot
 
-![Albion Online Logo](https://albiononline.com/themes/albion/images/logo.png)
-
 A Discord bot for organizing and managing Albion Online raids with database integration.
 
 ## Current Work In Progress
