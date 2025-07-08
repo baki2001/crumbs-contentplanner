@@ -40,3 +40,4 @@ class Participant(Base):
 
     user = relationship("User", back_populates="signups")
     raid = relationship("Raid", back_populates="participants")
+
