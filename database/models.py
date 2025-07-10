@@ -17,7 +17,7 @@ class ActivityTemplate(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
     description = Column(Text)
-    slot_definition = Column(JSON)
+    slot_definition = Column(JSON)  # Format: {"role": {"count": 1, "unlimited": False, "emoji": "🛡️"}}
     created_by = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 
 class Activity(Base):
@@ -28,17 +28,21 @@ class Activity(Base):
     scheduled_time = Column(TIMESTAMP)
     created_by = Column(BigInteger, ForeignKey("users.id"))
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
-
+    location = Column(String(100))
+    message_id = Column(BigInteger)
+    channel_id = Column(BigInteger)
+    
     creator = relationship("User", back_populates="activities_created")
     participants = relationship("ActivityParticipant", back_populates="activity")
+    template = relationship("ActivityTemplate")
 
 class ActivityParticipant(Base):
     __tablename__ = "activity_participants"
     id = Column(Integer, primary_key=True)
     activity_id = Column(Integer, ForeignKey("activities.id"))
     user_id = Column(BigInteger, ForeignKey("users.id"))
-    role = Column(String)
-    status = Column(String, default="confirmed")
-
+    role = Column(String(50))
+    status = Column(String(20), default="confirmed")
+    
     user = relationship("User", back_populates="activity_signups")
     activity = relationship("Activity", back_populates="participants")

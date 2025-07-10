@@ -13,6 +13,10 @@ class UserService:
             user = result.scalars().first()
             
             if user:
+                # Update name if changed
+                if user.name != user_name:
+                    user.name = user_name
+                    await session.commit()
                 return user
                 
             # Create new user if not exists
@@ -22,3 +26,9 @@ class UserService:
             await session.refresh(new_user)
             logging.info(f"Created new user: {user_id} - {user_name}")
             return new_user
+    
+    @staticmethod
+    async def get_user(user_id: int):
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            return result.scalars().first()

@@ -2,14 +2,14 @@ import logging
 from database.database import AsyncSessionLocal
 from database.models import ActivityTemplate
 from sqlalchemy.future import select
-from services.user_service import UserService  # Add this import
+from services.user_service import UserService
 
 class TemplateService:
     @staticmethod
-    async def create_template(name: str, description: str, slot_definition: dict, creator_id: int, creator_name: str):  # Add creator_name
+    async def create_template(name: str, description: str, slot_definition: dict, creator_id: int, creator_name: str):
         async with AsyncSessionLocal() as session:
             # Ensure user exists
-            user = await UserService.get_or_create_user(creator_id, creator_name)
+            creator = await UserService.get_or_create_user(creator_id, creator_name)
             
             template = ActivityTemplate(
                 name=name,

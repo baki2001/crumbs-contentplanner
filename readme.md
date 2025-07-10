@@ -1,75 +1,130 @@
-crumbs contentplanner - Project Roadmap
 
-Core Concept:
-- Discord bot for organizing ALL Albion Online group activities
-- Flexible system supporting:
-  • Avalonian Dungeons (raids)
-  • Ganking Parties
-  • PvE Expeditions
-  • Gathering Caravans
-  • Faction Warfare
-  • Hellgates/Crystal League
-- Hybrid command system (both prefix and slash commands)
-- PostgreSQL database backend
+# Albion Online Activity Planner Bot - User Guide
 
-Key Features Implemented:
-✓ Hybrid command system
-✓ Database integration with health checks
-✓ Template management system
-  - /addtemplate command
-  - /listtemplates command
-✓ Role-based access control (admin commands)
-✓ Rich console logging
-✓ Server information display
+## Getting Started
 
-Immediate Next Steps (Core Functionality):
-1. Activity Scheduling System:
-   - /createactivity command
-   - Template selection
-   - DateTime picker with timezone support
-   - Location specification (Brecilien, Caerleon, etc.)
+1. **Invite the bot** to your Discord server with the proper permissions  
+2. **Set up admin roles** by configuring `ADMIN_IDS` in secrets.env  
+3. **Start the bot** using `python bot.py`
 
-2. Flexible Participation System:
-   - /join command with role selection
-   - /leave command
-   - Role-based slot management
-   - Waitlist/backup system
+## Command Overview
 
-3. Activity Display System:
-   - /activityinfo command
-   - Embed-based activity cards showing:
-     • Time remaining
-     • Participants by role
-     • Available slots
-     • Activity location
+### Template Management (Admin Only)
 
-4. Notification System:
-   - Automated reminders (24h/1h before)
-   - Last-minute call notifications
+#### Create a Template
 
-Technical Foundation:
-- Python 3.10+
-- Discord.py 2.3.2+
-- SQLAlchemy 2.0+ (async)
-- PostgreSQL 14+
-- Rich logging
+`/addtemplate <name>`  
+text
 
-Database Models:
-• ActivityTemplate
-  - name, description, slot_definition (JSON)
-• Activity
-  - template_id, scheduled_time, activity_type, location
-• ActivityParticipant
-  - role, status (confirmed/backup)
+- Opens a modal to enter:
+  - Description
+  - Slot definition in JSON format:
+    ```json
+    {
+      "Tank": {"count": 1, "unlimited": false, "emoji": "🛡️"},
+      "Healer": {"count": 2, "unlimited": false, "emoji": "❤️"},
+      "DPS": {"count": 5, "unlimited": true}
+    }
+    ```
+- Unlimited roles have no participant limits  
+- Emojis will appear on role selection buttons
 
-Future Vision:
-◆ Web Dashboard (Flask/FastAPI)
-  - Admin template management
-  - Activity calendar view
-  - Participant management
-◆ Albion API Integration
-  - Character verification
-  - Gear score checks
-◆ Mobile-friendly interface
-◆ Stat tracking and reputation system
+#### List Available Templates
 
+`/listtemplates`  
+text
+
+- Shows all created templates with their slot configurations
+
+### Activity Scheduling
+
+#### Create an Activity
+
+`/createactivity <template_name>`  
+text
+
+- Opens a modal to enter:
+  - Date & Time (UTC format: `YYYY-MM-DD HH:MM`)
+  - Location (e.g., "Brecilien", "Caerleon")
+- Creates an embed with role selection buttons
+
+#### Join an Activity
+
+- Click the role button on the activity embed  
+- Unlimited roles: Always available  
+- Limited roles: Only available until slots fill
+
+#### Leave an Activity
+
+`/leaveactivity <activity_id>`  
+text
+
+- Activity ID is shown at the bottom of each activity embed
+
+### Utility Commands
+
+#### Check Bot Status
+
+`/ping`  
+text
+
+- Returns bot latency
+
+#### Verify Database Connection
+
+`/dbcheck`  
+text
+
+- Shows database response time and connection details
+
+## Example Workflow
+
+1. Admin creates a template:
+
+`/addtemplate Avalonian`  
+text
+
+```json
+{
+  "Tank": {"count": 2, "emoji": "🛡️"},
+  "Healer": {"count": 4, "emoji": "❤️"},
+  "DPS": {"count": 10, "unlimited": true},
+  "Scout": {"count": 2, "emoji": "👁️"}
+}
+```
+
+2. User schedules an activity:  
+text  
+`/createactivity Avalonian`  
+Enters: 2023-12-15 20:00 and Brecilien
+
+3. Participants join:  
+Click desired role button on the embed  
+Unlimited DPS slots always available  
+Limited roles show available slots (e.g., "Tank (1/2)")
+
+4. View scheduled activities:  
+Each activity shows:
+- Time remaining  
+- Participants by role  
+- Available slots  
+- Location
+
+## Best Practices
+
+**For Admins:**
+- Use clear template names (e.g., "Avalonian-10man")
+- Set reasonable slot limits
+- Include emojis for visual clarity
+
+**For Users:**
+- Join activities early for limited roles
+- Use `/leaveactivity` if you can't attend
+- All times are in UTC
+
+## Troubleshooting
+
+- Commands not appearing? Try `/sync` (owner only)
+- Button not working? The bot may have restarted - recreate the activity
+- Timezone confusion? All times are displayed in UTC
+- Pro Tip: Pin the activity message in your channel for easy access!
