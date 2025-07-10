@@ -1,0 +1,154 @@
+# PROJECT OVERVIEW
+Bot Name: Albion Activity Planner
+Purpose: Discord bot for organizing all Albion Online group activities with flexible scheduling
+Core Concept: "Build for flexibility first - all Albion content should be schedulable"
+Version: v0.5.0
+
+# DESIGN PHILOSOPHY
+1. Mobile-friendly Discord experience first
+2. Powerful but accessible admin tools
+3. Flexible template system for all activity types
+4. Hybrid command system (prefix + slash commands)
+5. Progressive enhancement - start simple, add complexity gradually
+
+# TECHNICAL FOUNDATION
+- Python 3.10+
+- Discord.py 2.3.2+
+- SQLAlchemy 2.0+ (async)
+- PostgreSQL 14+
+- Rich logging
+
+# CORE FEATURES IMPLEMENTED
+## Template System
+- Role-based slot definitions with unlimited toggle
+- Emoji support per role
+- JSON-based configuration
+- Admin-protected creation
+- /addtemplate, /listtemplates commands
+
+## Activity Scheduling
+- Template-based activity creation
+- UTC datetime scheduling
+- Location specification
+- Persistent activity embeds
+- /createactivity command
+
+## Participation System
+- Role-based signups with buttons
+- Unlimited role support
+- Slot limits enforcement
+- Activity ID system
+- /leaveactivity command
+
+## Utility Features
+- Hybrid command system
+- Database health checks
+- Admin role protection
+- Rich logging
+- /ping, /dbcheck, /help commands
+
+# CURRENT DEVELOPMENT FOCUS
+1. Notification system (reminders)
+2. Activity editing commands
+3. Timezone conversion support
+4. Web dashboard integration
+5. Activity archiving
+
+# IMMEDIATE NEXT STEPS
+## Priority Features
+1. Notification System:
+   - 24h/1h automated reminders
+   - Last-minute call notifications
+   - Configurable notification channels
+
+2. Activity Management:
+   - /editactivity command (time/location)
+   - /cancelactivity command
+   - Participant management tools
+
+3. Timezone Support:
+   - User timezone configuration
+   - Automatic UTC conversion
+   - Timezone-aware scheduling
+
+## Technical Improvements
+1. Activity persistence across restarts
+2. Button interaction handling optimization
+3. Database indexing for performance
+4. Error handling refinement
+
+# FUTURE VISION
+## Core Bot Features
+◆ Web Dashboard (Flask/FastAPI)
+  - Activity calendar view
+  - Template management
+  - Participant analytics
+◆ Albion API Integration
+  - Character verification
+  - Gear score checks
+◆ Stat tracking and reputation system
+◆ Discord event integration
+◆ Cross-server activity discovery
+
+## Game Feature Support
+• Avalonian Dungeons (raids)
+• Ganking Parties
+• PvE Expeditions
+• Gathering Caravans
+• Faction Warfare
+• Hellgates/Crystal League
+• Territory Wars
+• Faction Transport
+
+# TECHNICAL CHALLENGES
+1. Timezone handling complexity
+2. Discord interaction expiration
+3. Large-scale activity management
+4. Button state persistence
+5. Database optimization for high traffic
+6. Command synchronization issues
+
+# CODE STRUCTURE
+bot.py - Main bot logic
+├── Command handlers
+├── Modal handlers
+├── Button views
+├── Embed generators
+├── Error handlers
+
+database/
+├── models.py - SQLAlchemy models
+├── database.py - DB connection
+├── rbac.py - Role-based access
+
+services/
+├── template_service.py
+├── activity_service.py
+├── user_service.py
+
+config.py - Configuration loader
+requirements.txt - Dependencies
+README.md - Documentation
+
+# IMPORTANT NOTES
+• All times are in UTC - Timezone support pending
+• Activity embeds store message/channel IDs
+• Unlimited roles have no participant limits
+• Hybrid commands must be explicitly added to tree
+• Use admin_only decorator for protected commands
+• Bot requires "applications.commands" scope
+
+# RECENT ISSUES RESOLVED
+• Fixed "unknown interaction" errors
+• Resolved template creation foreign key issues
+• Improved JSON validation for templates
+• Redesigned help command for better UX
+• Fixed activity creation modal flow
+
+# DESIGN DECISIONS
+1. Activity IDs visible in embeds for management
+2. Ephemeral responses for user feedback
+3. Rich embeds for all visual output
+4. PostgreSQL for relational data integrity
+5. Asyncpg for database performance
+6. Hybrid commands for flexibility

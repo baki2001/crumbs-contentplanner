@@ -15,7 +15,7 @@ from sqlalchemy import text
 from services.template_service import TemplateService
 from services.activity_service import ActivityService
 from services.user_service import UserService
-from database.rbac import admin_only
+from rbac import admin_only
 from datetime import datetime, timedelta
 
 # Initialize rich
@@ -46,11 +46,22 @@ class MyBot(commands.Bot):
     async def setup_hook(self):
         if not self.synced:
             try:
+                # Explicitly add all commands to the tree
+                self.tree.add_command(createactivity)
+                self.tree.add_command(leaveactivity)
+                self.tree.add_command(addtemplate)
+                self.tree.add_command(listtemplates)
+                self.tree.add_command(ping)
+                self.tree.add_command(dbcheck)
+                self.tree.add_command(help_command)
+                self.tree.add_command(sync)
+                
                 await self.tree.sync()
                 self.synced = True
                 logging.info("✅ Commands synced globally")
+                logging.info(f"Synced commands: {[cmd.name for cmd in self.tree.get_commands()]}")
             except Exception as e:
-                logging.error(f"Initial command sync error: {e}")
+                logging.error(f"Command sync error: {e}")
 
 bot = MyBot()
 
@@ -84,14 +95,21 @@ async def on_ready():
         ))
         bot.presence_set = True
         logging.info(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
+        
+        # Debug: list all registered commands
+        commands_list = [cmd.name for cmd in bot.tree.get_commands()]
+        logging.info(f"Registered commands: {commands_list}")
 
-# Core commands
-@bot.hybrid_command(description="Check bot latency")
+# ======================
+# CORE COMMANDS
+# ======================
+
+@bot.hybrid_command(name="ping", description="Check bot latency")
 async def ping(ctx):
     latency = round(bot.latency * 1000)
     await ctx.send(f"🏓 Pong! Latency: {latency}ms")
 
-@bot.hybrid_command(description="Verify database connectivity")
+@bot.hybrid_command(name="dbcheck", description="Verify database connectivity")
 async def dbcheck(ctx):
     try:
         async with AsyncSessionLocal() as session:
@@ -111,8 +129,11 @@ async def dbcheck(ctx):
     except Exception as e:
         await ctx.send(f"❌ Connection failed: {str(e)}")
 
-# Template management commands
-@bot.hybrid_command(description="Create a new activity template")
+# ======================
+# TEMPLATE MANAGEMENT
+# ======================
+
+@bot.hybrid_command(name="addtemplate", description="Create a new activity template")
 @admin_only()
 async def addtemplate(ctx, name: str):
     """Create a template for activities"""
@@ -193,7 +214,7 @@ async def addtemplate(ctx, name: str):
         logging.error(f"Addtemplate command error: {e}")
         await ctx.send(f"❌ Command failed: {str(e)}")
 
-@bot.hybrid_command(description="List available templates")
+@bot.hybrid_command(name="listtemplates", description="List available templates")
 async def listtemplates(ctx):
     """Show all activity templates"""
     try:
@@ -203,7 +224,7 @@ async def listtemplates(ctx):
             return await ctx.send("ℹ️ No templates available yet")
         
         embed = discord.Embed(
-            title="Activity Templates",
+            title="📋 Activity Templates",
             description="Available templates for scheduling activities",
             color=0x3498db
         )
@@ -216,18 +237,22 @@ async def listtemplates(ctx):
                 roles.append(f"{emoji} {role}: {count}")
             
             embed.add_field(
-                name=template.name,
+                name=f"🔹 {template.name}",
                 value=f"{template.description}\n**Slots:** {', '.join(roles)}",
                 inline=False
             )
         
+        embed.set_footer(text=f"Total templates: {len(templates)}")
         await ctx.send(embed=embed)
     except Exception as e:
         logging.error(f"Listtemplates error: {e}")
         await ctx.send(f"❌ Failed to load templates: {str(e)}")
 
-# Activity Scheduling Commands
-@bot.hybrid_command(description="Schedule a new activity")
+# ======================
+# ACTIVITY SCHEDULING
+# ======================
+
+@bot.hybrid_command(name="createactivity", description="Schedule a new activity")
 async def createactivity(ctx, template_name: str):
     """Create a new activity from a template"""
     try:
@@ -236,70 +261,203 @@ async def createactivity(ctx, template_name: str):
         if not template:
             return await ctx.send(f"❌ Template '{template_name}' not found", ephemeral=True)
         
-        # Create modal for activity details
-        modal = Modal(title=f"Schedule: {template_name}")
-        modal.add_item(TextInput(
-            label="Date & Time (YYYY-MM-DD HH:MM UTC)",
-            placeholder="2023-12-31 20:00",
-            required=True
-        ))
-        modal.add_item(TextInput(
-            label="Location",
-            placeholder="Brecilien, Caerleon, etc.",
-            required=True
-        ))
-        
-        async def on_submit(interaction: discord.Interaction):
-            try:
-                # Parse datetime
-                dt_str = modal.children[0].value
+        # Create modal class
+        class ActivityModal(Modal, title=f"Schedule: {template_name}"):
+            time_input = TextInput(
+                label="Date & Time (YYYY-MM-DD HH:MM UTC)",
+                placeholder="2023-12-31 20:00",
+                required=True
+            )
+            location_input = TextInput(
+                label="Location",
+                placeholder="Brecilien, Caerleon, etc.",
+                required=True
+            )
+            
+            async def on_submit(self, interaction: discord.Interaction):
                 try:
-                    scheduled_time = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-                except ValueError:
-                    return await interaction.response.send_message(
-                        "❌ Invalid datetime format. Use: YYYY-MM-DD HH:MM",
+                    # Parse datetime
+                    try:
+                        scheduled_time = datetime.strptime(self.time_input.value, "%Y-%m-%d %H:%M")
+                    except ValueError:
+                        await interaction.response.send_message(
+                            "❌ Invalid datetime format. Use: YYYY-MM-DD HH:MM",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    location = self.location_input.value
+                    
+                    # Create activity
+                    activity = await ActivityService.create_activity(
+                        template_id=template.id,
+                        scheduled_time=scheduled_time,
+                        location=location,
+                        creator_id=interaction.user.id,
+                        creator_name=interaction.user.display_name
+                    )
+                    
+                    # Create activity display
+                    embed = await create_activity_embed(activity)
+                    msg = await interaction.channel.send(embed=embed)
+                    
+                    # Store message reference
+                    await ActivityService.update_activity_message(activity.id, interaction.channel.id, msg.id)
+                    
+                    # Add role selection buttons
+                    view = RoleSelectionView(activity.id, template.slot_definition)
+                    await msg.edit(view=view)
+                    
+                    await interaction.response.send_message(
+                        f"✅ Activity scheduled for {scheduled_time} in {location}",
                         ephemeral=True
                     )
-                
-                location = modal.children[1].value
-                
-                # Create activity
-                activity = await ActivityService.create_activity(
-                    template_id=template.id,
-                    scheduled_time=scheduled_time,
-                    location=location,
-                    creator_id=ctx.author.id,
-                    creator_name=ctx.author.display_name
-                )
-                
-                # Create activity display
-                embed = await create_activity_embed(activity)
-                msg = await ctx.channel.send(embed=embed)
-                
-                # Store message reference
-                await ActivityService.update_activity_message(activity.id, ctx.channel.id, msg.id)
-                
-                # Add role selection buttons
-                view = RoleSelectionView(activity.id, template.slot_definition)
-                await msg.edit(view=view)
-                
-                await interaction.response.send_message(
-                    f"✅ Activity scheduled for {scheduled_time} in {location}",
-                    ephemeral=True
-                )
-            except Exception as e:
-                logging.error(f"Activity creation error: {e}")
-                await interaction.response.send_message(
-                    f"❌ Failed to create activity: {str(e)}",
-                    ephemeral=True
-                )
+                except Exception as e:
+                    logging.error(f"Activity creation error: {e}")
+                    await interaction.response.send_message(
+                        f"❌ Failed to create activity: {str(e)}",
+                        ephemeral=True
+                    )
         
-        modal.on_submit = on_submit
-        await ctx.interaction.response.send_modal(modal)
+        # Send the modal
+        await ctx.interaction.response.send_modal(ActivityModal())
         
     except Exception as e:
         logging.error(f"Createactivity error: {e}")
         await ctx.send(f"❌ Command failed: {str(e)}")
+
+@bot.hybrid_command(name="leaveactivity", description="Leave an activity")
+async def leaveactivity(ctx, activity_id: int):
+    """Leave an existing activity"""
+    try:
+        # Remove participant
+        participant = await ActivityService.remove_participant(activity_id, ctx.author.id)
+        
+        if participant:
+            # Update activity display
+            activity = await ActivityService.get_activity_by_id(activity_id)
+            embed = await create_activity_embed(activity)
+            
+            # Find the message to update
+            channel = bot.get_channel(activity.channel_id)
+            if channel:
+                try:
+                    msg = await channel.fetch_message(activity.message_id)
+                    await msg.edit(embed=embed)
+                except:
+                    logging.warning("Couldn't find activity message")
+            
+            await ctx.send("✅ You've left the activity", ephemeral=True)
+        else:
+            await ctx.send("❌ You're not participating in this activity", ephemeral=True)
+    except Exception as e:
+        logging.error(f"Leaveactivity error: {e}")
+        await ctx.send(f"❌ Failed to leave activity: {str(e)}")
+
+# ======================
+# HELP COMMAND (REDESIGNED)
+# ======================
+
+@bot.hybrid_command(name="help", description="Show help message")
+async def help_command(ctx):
+    """Show the help menu"""
+    try:
+        # Create main embed
+        embed = discord.Embed(
+            title="🌟 Albion Activity Planner - Help Menu",
+            description="Everything you need to organize Albion Online activities!",
+            color=0x3498db
+        )
+        embed.set_thumbnail(url="https://albiononline.com/static/images/logo/logo.png")
+        
+        # Activity Scheduling Section
+        activity_value = (
+            "`/createactivity <template>` - Schedule a new activity\n"
+            "`/leaveactivity <id>` - Leave an activity by ID\n"
+        )
+        embed.add_field(
+            name="📅 Activity Scheduling",
+            value=activity_value,
+            inline=False
+        )
+        
+        # Template Management Section
+        template_value = (
+            "`/addtemplate <name>` - Create a new activity template\n"
+            "`/listtemplates` - List available templates\n"
+            "*(Admin only commands)*"
+        )
+        embed.add_field(
+            name="📋 Template Management",
+            value=template_value,
+            inline=False
+        )
+        
+        # Utility Section
+        utility_value = (
+            "`/ping` - Check bot latency\n"
+            "`/dbcheck` - Verify database connectivity\n"
+            "`/help` - Show this help message\n"
+        )
+        embed.add_field(
+            name="⚙️ Utility Commands",
+            value=utility_value,
+            inline=False
+        )
+        
+        # Admin Section
+        admin_value = "`/sync` - Sync commands (Bot Owner)"
+        embed.add_field(
+            name="👑 Admin Commands",
+            value=admin_value,
+            inline=False
+        )
+        
+        # Tips Section
+        tips = (
+            "• All times are in UTC\n"
+            "• Use `/listtemplates` to see available activity types\n"
+            "• Click role buttons to join activities\n"
+            "• Pin activity messages for easy access!"
+        )
+        embed.add_field(
+            name="💡 Tips",
+            value=tips,
+            inline=False
+        )
+        
+        embed.set_footer(text="Need more help? Contact your server admin")
+        await ctx.send(embed=embed)
+    except Exception as e:
+        logging.error(f"Help command error: {e}")
+        await ctx.send("❌ Failed to display help")
+
+# ======================
+# ADMIN COMMANDS
+# ======================
+
+@bot.hybrid_command(name="sync", description="Sync commands (owner only)")
+@commands.is_owner()
+async def sync(ctx: commands.Context):
+    """Sync slash commands"""
+    try:
+        # Defer the response to prevent timeout
+        if ctx.interaction:
+            await ctx.interaction.response.defer(thinking=True)
+        
+        # Perform the sync
+        synced_commands = await bot.tree.sync()
+        bot.synced = True
+        
+        # Send confirmation
+        await ctx.send(f"✅ Synced {len(synced_commands)} commands globally")
+    except Exception as e:
+        logging.error(f"Sync error: {e}")
+        await ctx.send(f"❌ Sync failed: {e}")
+
+# ======================
+# SUPPORTING FUNCTIONS
+# ======================
 
 # Role selection buttons
 class RoleSelectionView(discord.ui.View):
@@ -363,34 +521,6 @@ class RoleButton(discord.ui.Button):
                 ephemeral=True
             )
 
-@bot.hybrid_command(description="Leave an activity")
-async def leaveactivity(ctx, activity_id: int):
-    """Leave an existing activity"""
-    try:
-        # Remove participant
-        participant = await ActivityService.remove_participant(activity_id, ctx.author.id)
-        
-        if participant:
-            # Update activity display
-            activity = await ActivityService.get_activity_by_id(activity_id)
-            embed = await create_activity_embed(activity)
-            
-            # Find the message to update
-            channel = bot.get_channel(activity.channel_id)
-            if channel:
-                try:
-                    msg = await channel.fetch_message(activity.message_id)
-                    await msg.edit(embed=embed)
-                except:
-                    logging.warning("Couldn't find activity message")
-            
-            await ctx.send("✅ You've left the activity", ephemeral=True)
-        else:
-            await ctx.send("❌ You're not participating in this activity", ephemeral=True)
-    except Exception as e:
-        logging.error(f"Leaveactivity error: {e}")
-        await ctx.send(f"❌ Failed to leave activity: {str(e)}")
-
 # Activity Embed Creation
 async def create_activity_embed(activity):
     # Get activity details
@@ -443,66 +573,22 @@ async def create_activity_embed(activity):
     
     embed.set_footer(text=f"Created by {creator_name}")
     embed.add_field(
-        name="Time Remaining",
+        name="⏱️ Time Remaining",
         value=f"{int(hours)}h {int(minutes)}m",
         inline=False
     )
     embed.add_field(
-        name="Activity ID",
+        name="🔢 Activity ID",
         value=f"`{activity.id}`",
         inline=False
     )
     
     return embed
 
-# Help command
-@bot.hybrid_command(description="Show help message")
-async def help(ctx):
-    try:
-        embed = discord.Embed(
-            title="Albion Activity Planner Help",
-            description="**Activity Scheduling**\n"
-                      "`/createactivity <template>` - Schedule a new activity\n"
-                      "`/leaveactivity <id>` - Leave an activity\n\n"
-                      "**Template Management**\n"
-                      "`/addtemplate <name>` - Create new activity template (Admin)\n"
-                      "`/listtemplates` - Show available templates\n\n"
-                      "**Utility Commands**",
-            color=0x00ff00
-        )
-        commands_list = [
-            ("/ping", "Check bot latency"),
-            ("/dbcheck", "Verify database connectivity with details"),
-            ("/help", "Show this help message")
-        ]
-        for cmd, desc in commands_list:
-            embed.add_field(name=cmd, value=desc, inline=False)
-        await ctx.send(embed=embed)
-    except Exception as e:
-        logging.error(f"Help command error: {e}")
-        await ctx.send("❌ Failed to display help")
+# ======================
+# MAIN BOT LOOP
+# ======================
 
-# Admin commands
-@bot.hybrid_command(description="Sync commands (owner only)")
-@commands.is_owner()
-async def sync(ctx: commands.Context):
-    """Sync slash commands"""
-    try:
-        # Defer the response to prevent timeout
-        if ctx.interaction:
-            await ctx.interaction.response.defer(thinking=True)
-        
-        # Perform the sync
-        synced_commands = await bot.tree.sync()
-        bot.synced = True
-        
-        # Send confirmation
-        await ctx.send(f"✅ Synced {len(synced_commands)} commands globally")
-    except Exception as e:
-        logging.error(f"Sync error: {e}")
-        await ctx.send(f"❌ Sync failed: {e}")
-
-# Main bot loop
 async def main():
     try:
         await init_db()
