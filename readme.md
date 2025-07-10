@@ -1,4 +1,4 @@
-Albion Online Activity Planner Bot - Project Roadmap
+crumbs contentplanner - Project Roadmap
 
 Core Concept:
 - Discord bot for organizing ALL Albion Online group activities
