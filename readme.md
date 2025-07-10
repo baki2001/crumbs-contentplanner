@@ -1,74 +1,91 @@
-# Albion Raid Planner Bot
+Albion Online Activity Planner Bot - Project Roadmap
 
-A Discord bot for organizing and managing Albion Online raids with database integration.
+Core Concept:
+- Discord bot for organizing ALL Albion Online group activities
+- Flexible system supporting:
+  • Avalonian Dungeons (raids)
+  • Ganking Parties
+  • PvE Expeditions
+  • Gathering Caravans
+  • Faction Warfare
+  • Hellgates/Crystal League
+- Hybrid command system (both prefix and slash commands)
+- PostgreSQL database backend
 
-## Current Work In Progress
-- [ ] Implement `/createraid` command
-  - Basic raid creation flow
-  - Template selection
-  - Date/time picker
-- [ ] Design database schema for raid signups
-  - Participant roles (Tank/Healer/DPS)
-  - Backup slots system
-- [ ] Setup automated database backups
+Key Features Implemented:
+✓ Hybrid command system
+✓ Database integration with health checks
+✓ Template management system
+  - /addtemplate command
+  - /listtemplates command
+✓ Role-based access control (admin commands)
+✓ Rich console logging
+✓ Server information display
 
-## Immediate Backlog (Next Up)
-### Core Features
-- [ ] `/signup` command with role selection
-- [ ] Raid roster display with class icons
-- [ ] Automated raid reminders (24h/1h before)
-- [ ] Basic permission system (Creator controls)
+Immediate Next Steps (Core Functionality):
+1. Activity Scheduling System:
+   - /createactivity command
+   - Template selection
+   - DateTime picker with timezone support
+   - Location specification (Brecilien, Caerleon, etc.)
 
-### Quality of Life
-- [ ] Command aliases (!r instead of /raid)
-- [ ] Quick-response buttons for common actions
-- [ ] Timezone conversion helper
+2. Flexible Participation System:
+   - /join command with role selection
+   - /leave command
+   - Role-based slot management
+   - Waitlist/backup system
 
-## Technical Debt
-- [ ] Refactor database connection handling
-- [ ] Improve error logging
-- [ ] Add input validation
-- [ ] Write unit tests (pytest)
+3. Activity Display System:
+   - /activityinfo command
+   - Embed-based activity cards showing:
+     • Time remaining
+     • Participants by role
+     • Available slots
+     • Activity location
 
-## Future Ideas
-### Raid Management
-- [ ] Recurring raids system
-- [ ] Waitlist/backup system
-- [ ] Raid composition validator
-- [ ] Gear checklist integration
+4. Notification System:
+   - Automated reminders (24h/1h before)
+   - Last-minute call notifications
 
-### Social Features
-- [ ] Raid reputation points
-- [ ] MVP voting
-- [ ] Post-raid feedback system
+Technical Foundation:
+- Python 3.10+
+- Discord.py 2.3.2+
+- SQLAlchemy 2.0+ (async)
+- PostgreSQL 14+
+- Rich logging
 
-### Advanced
-- [ ] Discord event integration
-- [ ] Albion API connection
-- [ ] Loot distribution tracker
-- [ ] Web dashboard
+Database Models:
+• ActivityTemplate
+  - name, description, slot_definition (JSON)
+• Activity
+  - template_id, scheduled_time, activity_type, location
+• ActivityParticipant
+  - role, status (confirmed/backup)
 
-## Recently Completed
-- [x] Hybrid commands system
-- [x] Database health checks
-- [x] Server info command
-- [x] Rich console logging
+Future Vision:
+◆ Web Dashboard (Flask/FastAPI)
+  - Admin template management
+  - Activity calendar view
+  - Participant management
+◆ Albion API Integration
+  - Character verification
+  - Gear score checks
+◆ Mobile-friendly interface
+◆ Stat tracking and reputation system
+◆ Discord event integration
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/albion-raid-planner.git
-   cd albion-raid-planner
+Current Challenges:
+- Command synchronization issues
+- Template validation refinement
+- Timezone handling
 
----
+Next Session Goals:
+1. Implement /createactivity command
+2. Create base participation system (/join)
+3. Design activity display embed
+4. Fix remaining command sync issues
 
-### File Structure
-
-/albion-raid-planner
-├── bot.py                # Main bot logic
-├── database
-│   ├── __init__.py       # Connection handling
-│   ├── models.py         # SQLAlchemy models
-│   └── rbac.py           # Permission system
-├── config.py             # Environment config
-└── requirements.txt      # Dependencies
+Philosophy:
+"Build for flexibility first - all Albion content should be schedulable"
+"Focus on mobile-friendly Discord experience"
+"Keep admin tools powerful but accessible"

@@ -1,7 +1,7 @@
-# database/database.py
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from config import DATABASE_URL
 from database.models import Base
 import logging
@@ -18,7 +18,6 @@ engine = create_async_engine(
 
 AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
-# Make sure this function exists exactly like this:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -32,3 +31,14 @@ async def check_db_health():
     except Exception as e:
         logging.error(f"❌ Database health check failed: {e}")
         return False
+
+async def get_db_session():
+    """Get an async database session"""
+    session = AsyncSessionLocal()
+    try:
+        yield session
+    except SQLAlchemyError as e:
+        await session.rollback()
+        raise e
+    finally:
+        await session.close()
