@@ -14,7 +14,6 @@ from database.database import init_db, AsyncSessionLocal, check_db_health
 from sqlalchemy import text
 from services.template_service import TemplateService
 from database.rbac import admin_only
-from services.user_service import UserService
 
 # Initialize rich
 install()
@@ -48,7 +47,7 @@ class MyBot(commands.Bot):
                 self.synced = True
                 logging.info("✅ Commands synced globally")
             except Exception as e:
-                logging.error(f"Command sync error: {e}")
+                logging.error(f"Initial command sync error: {e}")
 
 bot = MyBot()
 
@@ -63,7 +62,15 @@ async def on_command_error(ctx, error):
         await ctx.send(f"❌ Missing required argument: {error.param.name}")
     else:
         logging.error(f"Error in {ctx.command}: {error}", exc_info=True)
-        await ctx.send(f"❌ An error occurred: {str(error)}")
+        
+        try:
+            # Try to send error message normally
+            await ctx.send(f"❌ An error occurred: {str(error)}")
+        except discord.errors.NotFound:
+            # Handle "unknown interaction" specifically
+            logging.warning("Interaction expired before sending error message")
+        except Exception as e:
+            logging.error(f"Failed to send error message: {e}")
 
 @bot.event
 async def on_ready():
@@ -101,12 +108,16 @@ async def dbcheck(ctx):
     except Exception as e:
         await ctx.send(f"❌ Connection failed: {str(e)}")
 
-# Template management commands - FIXED with modal approach
+# Template management commands
 @bot.hybrid_command(description="Create a new activity template")
 @admin_only()
 async def addtemplate(ctx, name: str):
     """Create a template for activities"""
     try:
+        # Validate name
+        if len(name) < 3:
+            return await ctx.send("❌ Template name must be at least 3 characters", ephemeral=True)
+        
         existing = await TemplateService.get_template_by_name(name)
         if existing:
             return await ctx.send("❌ A template with this name already exists", ephemeral=True)
@@ -116,7 +127,8 @@ async def addtemplate(ctx, name: str):
         modal.add_item(TextInput(
             label="Description",
             placeholder="Brief description of this activity type",
-            required=True
+            required=True,
+            min_length=10
         ))
         modal.add_item(TextInput(
             label="Slot Definition (JSON)",
@@ -128,7 +140,24 @@ async def addtemplate(ctx, name: str):
         async def on_submit(interaction: discord.Interaction):
             try:
                 description = modal.children[0].value
-                slot_definition = json.loads(modal.children[1].value)
+                slot_input = modal.children[1].value
+                
+                # Try to parse as JSON
+                try:
+                    slot_definition = json.loads(slot_input)
+                except json.JSONDecodeError:
+                    # Try to fix common mistakes: single quotes, missing braces
+                    try:
+                        # Replace single quotes with double quotes
+                        fixed_input = slot_input.replace("'", '"')
+                        slot_definition = json.loads(fixed_input)
+                    except json.JSONDecodeError:
+                        # If still failing, try wrapping in braces
+                        try:
+                            fixed_input = '{' + slot_input + '}'
+                            slot_definition = json.loads(fixed_input)
+                        except json.JSONDecodeError:
+                            raise ValueError("Invalid JSON format")
                 
                 if not isinstance(slot_definition, dict):
                     return await interaction.response.send_message(
@@ -136,23 +165,26 @@ async def addtemplate(ctx, name: str):
                         ephemeral=True
                     )
                 
-                # Create template with creator info
+                # Validate slot values
+                for role, count in slot_definition.items():
+                    if not isinstance(count, int) or count < 1:
+                        return await interaction.response.send_message(
+                            f"❌ Invalid count for {role}: must be positive integer",
+                            ephemeral=True
+                        )
+                
+                # Create template
                 template = await TemplateService.create_template(
                     name=name,
                     description=description,
                     slot_definition=slot_definition,
                     creator_id=ctx.author.id,
-                    creator_name=ctx.author.display_name  # Add this
+                    creator_name=ctx.author.display_name
                 )
                 
                 await interaction.response.send_message(
                     f"✅ Created template: **{name}** with {sum(slot_definition.values())} slots",
                     ephemeral=False
-                )
-            except json.JSONDecodeError:
-                await interaction.response.send_message(
-                    "❌ Invalid JSON format for slots. Example: {'Tank':1, 'Healer':2}",
-                    ephemeral=True
                 )
             except Exception as e:
                 logging.error(f"Template creation error: {e}")
@@ -213,8 +245,7 @@ async def help(ctx):
         commands_list = [
             ("/ping", "Check bot latency"),
             ("/dbcheck", "Verify database connectivity with details"),
-            ("/help", "Show this help message"),
-            ("/sync", "Sync commands (Owner only)")
+            ("/help", "Show this help message")
         ]
         for cmd, desc in commands_list:
             embed.add_field(name=cmd, value=desc, inline=False)
@@ -229,12 +260,19 @@ async def help(ctx):
 async def sync(ctx: commands.Context):
     """Sync slash commands"""
     try:
-        await bot.tree.sync()
+        # Defer the response to prevent timeout
+        if ctx.interaction:
+            await ctx.interaction.response.defer(thinking=True)
+        
+        # Perform the sync
+        synced_commands = await bot.tree.sync()
         bot.synced = True
-        await ctx.send("✅ Commands synced globally")
+        
+        # Send confirmation
+        await ctx.send(f"✅ Synced {len(synced_commands)} commands globally")
     except Exception as e:
-        await ctx.send(f"❌ Sync failed: {e}")
         logging.error(f"Sync error: {e}")
+        await ctx.send(f"❌ Sync failed: {e}")
 
 # Main bot loop
 async def main():
