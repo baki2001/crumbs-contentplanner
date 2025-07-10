@@ -9,14 +9,14 @@ from rich.traceback import install
 from discord.ext import commands
 from discord import Intents, app_commands
 from discord.ui import Modal, TextInput, Button
-from config import DISCORD_TOKEN, BOT_PREFIX, DATABASE_URL
-from database.database import init_db, AsyncSessionLocal, check_db_health
+from config import DISCORD_TOKEN, DATABASE_URL
+from database.database import init_db, AsyncSessionLocal
 from sqlalchemy import text
 from services.template_service import TemplateService
 from services.activity_service import ActivityService
 from services.user_service import UserService
 from rbac import admin_only
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Initialize rich
 install()
@@ -37,80 +37,28 @@ intents.message_content = True
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix=BOT_PREFIX,
+            command_prefix='!',  # Not used but required
             intents=intents,
             help_command=None
         )
-        self.synced = False
         
     async def setup_hook(self):
-        if not self.synced:
-            try:
-                # Explicitly add all commands to the tree
-                self.tree.add_command(createactivity)
-                self.tree.add_command(leaveactivity)
-                self.tree.add_command(addtemplate)
-                self.tree.add_command(listtemplates)
-                self.tree.add_command(ping)
-                self.tree.add_command(dbcheck)
-                self.tree.add_command(help_command)
-                self.tree.add_command(sync)
-                
-                await self.tree.sync()
-                self.synced = True
-                logging.info("✅ Commands synced globally")
-                logging.info(f"Synced commands: {[cmd.name for cmd in self.tree.get_commands()]}")
-            except Exception as e:
-                logging.error(f"Command sync error: {e}")
+        await self.tree.sync()
+        logging.info("✅ Slash commands synced globally")
 
 bot = MyBot()
 
-# Error handling
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You don't have permissions for this command")
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"❌ Missing required argument: {error.param.name}")
-    else:
-        logging.error(f"Error in {ctx.command}: {error}", exc_info=True)
-        
-        try:
-            # Try to send error message normally
-            await ctx.send(f"❌ An error occurred: {str(error)}")
-        except discord.errors.NotFound:
-            # Handle "unknown interaction" specifically
-            logging.warning("Interaction expired before sending error message")
-        except Exception as e:
-            logging.error(f"Failed to send error message: {e}")
-
-@bot.event
-async def on_ready():
-    if not hasattr(bot, 'presence_set'):
-        await bot.change_presence(activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name="for /help"
-        ))
-        bot.presence_set = True
-        logging.info(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-        
-        # Debug: list all registered commands
-        commands_list = [cmd.name for cmd in bot.tree.get_commands()]
-        logging.info(f"Registered commands: {commands_list}")
-
 # ======================
-# CORE COMMANDS
+# SLASH COMMAND DEFINITIONS
 # ======================
 
-@bot.hybrid_command(name="ping", description="Check bot latency")
-async def ping(ctx):
+@bot.tree.command(name="ping", description="Check bot latency")
+async def ping(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! Latency: {latency}ms")
+    await interaction.response.send_message(f"🏓 Pong! Latency: {latency}ms")
 
-@bot.hybrid_command(name="dbcheck", description="Verify database connectivity")
-async def dbcheck(ctx):
+@bot.tree.command(name="dbcheck", description="Verify database connectivity")
+async def dbcheck(interaction: discord.Interaction):
     try:
         async with AsyncSessionLocal() as session:
             start = time.perf_counter()
@@ -120,33 +68,32 @@ async def dbcheck(ctx):
             db_host = DATABASE_URL.split('@')[-1].split('/')[0] if '@' in DATABASE_URL else "localhost"
             db_name = DATABASE_URL.split('/')[-1]
             
-            await ctx.send(
+            await interaction.response.send_message(
                 f"✅ Database connection healthy\n"
                 f"• Response: {db_time}ms\n"
                 f"• Host: `{db_host}`\n"
                 f"• Database: `{db_name}`"
             )
     except Exception as e:
-        await ctx.send(f"❌ Connection failed: {str(e)}")
+        await interaction.response.send_message(f"❌ Connection failed: {str(e)}")
 
-# ======================
-# TEMPLATE MANAGEMENT
-# ======================
-
-@bot.hybrid_command(name="addtemplate", description="Create a new activity template")
-@admin_only()
-async def addtemplate(ctx, name: str):
-    """Create a template for activities"""
+@bot.tree.command(name="addtemplate", description="Create a new activity template")
+@app_commands.checks.has_permissions(administrator=True)
+async def addtemplate(interaction: discord.Interaction, name: str):
     try:
-        # Validate name
         if len(name) < 3:
-            return await ctx.send("❌ Template name must be at least 3 characters", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ Template name must be at least 3 characters",
+                ephemeral=True
+            )
         
         existing = await TemplateService.get_template_by_name(name)
         if existing:
-            return await ctx.send("❌ A template with this name already exists", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ A template with this name already exists",
+                ephemeral=True
+            )
         
-        # Create the modal
         modal = Modal(title=f"Create Template: {name}")
         modal.add_item(TextInput(
             label="Description",
@@ -165,40 +112,35 @@ async def addtemplate(ctx, name: str):
                 description = modal.children[0].value
                 slot_input = modal.children[1].value
                 
-                # Parse slot definitions
                 try:
                     slot_definition = json.loads(slot_input)
                 except json.JSONDecodeError:
-                    # Try to fix common mistakes
                     try:
                         fixed_input = slot_input.replace("'", '"')
                         slot_definition = json.loads(fixed_input)
                     except:
                         raise ValueError("Invalid JSON format")
                 
-                # Validate structure
                 for role, data in slot_definition.items():
                     if not isinstance(data, dict):
                         raise ValueError(f"Invalid format for {role}. Should be an object")
                     if 'count' not in data:
                         raise ValueError(f"Missing 'count' for {role}")
                     if 'unlimited' not in data:
-                        data['unlimited'] = False  # Default to limited
+                        data['unlimited'] = False
                     if 'emoji' not in data:
-                        data['emoji'] = None  # Default no emoji
+                        data['emoji'] = None
                 
-                # Create template
                 template = await TemplateService.create_template(
                     name=name,
                     description=description,
                     slot_definition=slot_definition,
-                    creator_id=ctx.author.id,
-                    creator_name=ctx.author.display_name
+                    creator_id=interaction.user.id,
+                    creator_name=interaction.user.display_name
                 )
                 
                 await interaction.response.send_message(
-                    f"✅ Created template: **{name}** with {len(slot_definition)} roles",
-                    ephemeral=False
+                    f"✅ Created template: **{name}** with {len(slot_definition)} roles"
                 )
             except Exception as e:
                 logging.error(f"Template creation error: {e}")
@@ -208,20 +150,22 @@ async def addtemplate(ctx, name: str):
                 )
         
         modal.on_submit = on_submit
-        await ctx.interaction.response.send_modal(modal)
+        await interaction.response.send_modal(modal)
         
     except Exception as e:
         logging.error(f"Addtemplate command error: {e}")
-        await ctx.send(f"❌ Command failed: {str(e)}")
+        await interaction.response.send_message(
+            f"❌ Command failed: {str(e)}",
+            ephemeral=True
+        )
 
-@bot.hybrid_command(name="listtemplates", description="List available templates")
-async def listtemplates(ctx):
-    """Show all activity templates"""
+@bot.tree.command(name="listtemplates", description="List available templates")
+async def listtemplates(interaction: discord.Interaction):
     try:
         templates = await TemplateService.get_all_templates()
         
         if not templates:
-            return await ctx.send("ℹ️ No templates available yet")
+            return await interaction.response.send_message("ℹ️ No templates available yet")
         
         embed = discord.Embed(
             title="📋 Activity Templates",
@@ -243,25 +187,24 @@ async def listtemplates(ctx):
             )
         
         embed.set_footer(text=f"Total templates: {len(templates)}")
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
     except Exception as e:
         logging.error(f"Listtemplates error: {e}")
-        await ctx.send(f"❌ Failed to load templates: {str(e)}")
+        await interaction.response.send_message(
+            f"❌ Failed to load templates: {str(e)}",
+            ephemeral=True
+        )
 
-# ======================
-# ACTIVITY SCHEDULING
-# ======================
-
-@bot.hybrid_command(name="createactivity", description="Schedule a new activity")
-async def createactivity(ctx, template_name: str):
-    """Create a new activity from a template"""
+@bot.tree.command(name="createactivity", description="Schedule a new activity")
+async def createactivity(interaction: discord.Interaction, template_name: str):
     try:
-        # Get template
         template = await TemplateService.get_template_by_name(template_name)
         if not template:
-            return await ctx.send(f"❌ Template '{template_name}' not found", ephemeral=True)
+            return await interaction.response.send_message(
+                f"❌ Template '{template_name}' not found",
+                ephemeral=True
+            )
         
-        # Create modal class
         class ActivityModal(Modal, title=f"Schedule: {template_name}"):
             time_input = TextInput(
                 label="Date & Time (YYYY-MM-DD HH:MM UTC)",
@@ -276,7 +219,6 @@ async def createactivity(ctx, template_name: str):
             
             async def on_submit(self, interaction: discord.Interaction):
                 try:
-                    # Parse datetime
                     try:
                         scheduled_time = datetime.strptime(self.time_input.value, "%Y-%m-%d %H:%M")
                     except ValueError:
@@ -288,7 +230,6 @@ async def createactivity(ctx, template_name: str):
                     
                     location = self.location_input.value
                     
-                    # Create activity
                     activity = await ActivityService.create_activity(
                         template_id=template.id,
                         scheduled_time=scheduled_time,
@@ -297,14 +238,11 @@ async def createactivity(ctx, template_name: str):
                         creator_name=interaction.user.display_name
                     )
                     
-                    # Create activity display
                     embed = await create_activity_embed(activity)
                     msg = await interaction.channel.send(embed=embed)
                     
-                    # Store message reference
                     await ActivityService.update_activity_message(activity.id, interaction.channel.id, msg.id)
                     
-                    # Add role selection buttons
                     view = RoleSelectionView(activity.id, template.slot_definition)
                     await msg.edit(view=view)
                     
@@ -319,26 +257,24 @@ async def createactivity(ctx, template_name: str):
                         ephemeral=True
                     )
         
-        # Send the modal
-        await ctx.interaction.response.send_modal(ActivityModal())
+        await interaction.response.send_modal(ActivityModal())
         
     except Exception as e:
         logging.error(f"Createactivity error: {e}")
-        await ctx.send(f"❌ Command failed: {str(e)}")
+        await interaction.response.send_message(
+            f"❌ Command failed: {str(e)}",
+            ephemeral=True
+        )
 
-@bot.hybrid_command(name="leaveactivity", description="Leave an activity")
-async def leaveactivity(ctx, activity_id: int):
-    """Leave an existing activity"""
+@bot.tree.command(name="leaveactivity", description="Leave an existing activity")
+async def leaveactivity(interaction: discord.Interaction, activity_id: int):
     try:
-        # Remove participant
-        participant = await ActivityService.remove_participant(activity_id, ctx.author.id)
+        participant = await ActivityService.remove_participant(activity_id, interaction.user.id)
         
         if participant:
-            # Update activity display
             activity = await ActivityService.get_activity_by_id(activity_id)
             embed = await create_activity_embed(activity)
             
-            # Find the message to update
             channel = bot.get_channel(activity.channel_id)
             if channel:
                 try:
@@ -347,22 +283,25 @@ async def leaveactivity(ctx, activity_id: int):
                 except:
                     logging.warning("Couldn't find activity message")
             
-            await ctx.send("✅ You've left the activity", ephemeral=True)
+            await interaction.response.send_message(
+                "✅ You've left the activity",
+                ephemeral=True
+            )
         else:
-            await ctx.send("❌ You're not participating in this activity", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ You're not participating in this activity",
+                ephemeral=True
+            )
     except Exception as e:
         logging.error(f"Leaveactivity error: {e}")
-        await ctx.send(f"❌ Failed to leave activity: {str(e)}")
+        await interaction.response.send_message(
+            f"❌ Failed to leave activity: {str(e)}",
+            ephemeral=True
+        )
 
-# ======================
-# HELP COMMAND (REDESIGNED)
-# ======================
-
-@bot.hybrid_command(name="help", description="Show help message")
-async def help_command(ctx):
-    """Show the help menu"""
+@bot.tree.command(name="help", description="Show help message")
+async def help_command(interaction: discord.Interaction):
     try:
-        # Create main embed
         embed = discord.Embed(
             title="🌟 Albion Activity Planner - Help Menu",
             description="Everything you need to organize Albion Online activities!",
@@ -370,110 +309,73 @@ async def help_command(ctx):
         )
         embed.set_thumbnail(url="https://albiononline.com/static/images/logo/logo.png")
         
-        # Activity Scheduling Section
         activity_value = (
             "`/createactivity <template>` - Schedule a new activity\n"
             "`/leaveactivity <id>` - Leave an activity by ID\n"
         )
-        embed.add_field(
-            name="📅 Activity Scheduling",
-            value=activity_value,
-            inline=False
-        )
+        embed.add_field(name="📅 Activity Scheduling", value=activity_value, inline=False)
         
-        # Template Management Section
         template_value = (
             "`/addtemplate <name>` - Create a new activity template\n"
             "`/listtemplates` - List available templates\n"
             "*(Admin only commands)*"
         )
-        embed.add_field(
-            name="📋 Template Management",
-            value=template_value,
-            inline=False
-        )
+        embed.add_field(name="📋 Template Management", value=template_value, inline=False)
         
-        # Utility Section
         utility_value = (
             "`/ping` - Check bot latency\n"
             "`/dbcheck` - Verify database connectivity\n"
             "`/help` - Show this help message\n"
         )
-        embed.add_field(
-            name="⚙️ Utility Commands",
-            value=utility_value,
-            inline=False
-        )
+        embed.add_field(name="⚙️ Utility Commands", value=utility_value, inline=False)
         
-        # Admin Section
         admin_value = "`/sync` - Sync commands (Bot Owner)"
-        embed.add_field(
-            name="👑 Admin Commands",
-            value=admin_value,
-            inline=False
-        )
+        embed.add_field(name="👑 Admin Commands", value=admin_value, inline=False)
         
-        # Tips Section
         tips = (
             "• All times are in UTC\n"
             "• Use `/listtemplates` to see available activity types\n"
             "• Click role buttons to join activities\n"
             "• Pin activity messages for easy access!"
         )
-        embed.add_field(
-            name="💡 Tips",
-            value=tips,
-            inline=False
-        )
+        embed.add_field(name="💡 Tips", value=tips, inline=False)
         
         embed.set_footer(text="Need more help? Contact your server admin")
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
     except Exception as e:
         logging.error(f"Help command error: {e}")
-        await ctx.send("❌ Failed to display help")
+        await interaction.response.send_message(
+            "❌ Failed to display help",
+            ephemeral=True
+        )
 
-# ======================
-# ADMIN COMMANDS
-# ======================
-
-@bot.hybrid_command(name="sync", description="Sync commands (owner only)")
-@commands.is_owner()
-async def sync(ctx: commands.Context):
-    """Sync slash commands"""
+@bot.tree.command(name="sync", description="Sync commands (owner only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def sync(interaction: discord.Interaction):
     try:
-        # Defer the response to prevent timeout
-        if ctx.interaction:
-            await ctx.interaction.response.defer(thinking=True)
-        
-        # Perform the sync
+        await interaction.response.defer(thinking=True)
         synced_commands = await bot.tree.sync()
-        bot.synced = True
-        
-        # Send confirmation
-        await ctx.send(f"✅ Synced {len(synced_commands)} commands globally")
+        await interaction.followup.send(f"✅ Synced {len(synced_commands)} commands globally")
     except Exception as e:
         logging.error(f"Sync error: {e}")
-        await ctx.send(f"❌ Sync failed: {e}")
+        await interaction.followup.send(f"❌ Sync failed: {e}")
 
 # ======================
-# SUPPORTING FUNCTIONS
+# SUPPORTING COMPONENTS
 # ======================
 
-# Role selection buttons
 class RoleSelectionView(discord.ui.View):
     def __init__(self, activity_id, slot_definition):
         super().__init__(timeout=None)
         self.activity_id = activity_id
         self.slot_definition = slot_definition
         
-        # Create a button for each role
         for role, data in slot_definition.items():
             emoji = data.get('emoji')
             self.add_item(RoleButton(role, emoji, activity_id))
 
 class RoleButton(discord.ui.Button):
     def __init__(self, role, emoji, activity_id):
-        # Use emoji if available
         if emoji:
             super().__init__(label=role, emoji=emoji, style=discord.ButtonStyle.primary)
         else:
@@ -483,7 +385,6 @@ class RoleButton(discord.ui.Button):
         
     async def callback(self, interaction: discord.Interaction):
         try:
-            # Join activity with selected role
             participant, error = await ActivityService.add_participant(
                 self.activity_id,
                 interaction.user.id,
@@ -492,11 +393,9 @@ class RoleButton(discord.ui.Button):
             )
             
             if participant:
-                # Update activity display
                 activity = await ActivityService.get_activity_by_id(self.activity_id)
                 embed = await create_activity_embed(activity)
                 
-                # Find the message to update
                 channel = bot.get_channel(activity.channel_id)
                 if channel:
                     try:
@@ -521,13 +420,10 @@ class RoleButton(discord.ui.Button):
                 ephemeral=True
             )
 
-# Activity Embed Creation
 async def create_activity_embed(activity):
-    # Get activity details
     template = activity.template
     participants = activity.participants
     
-    # Group participants by role
     role_participants = {}
     for role in template.slot_definition.keys():
         role_participants[role] = []
@@ -536,12 +432,10 @@ async def create_activity_embed(activity):
         if p.role in role_participants:
             role_participants[p.role].append(p.user.name)
     
-    # Calculate time remaining
     time_remaining = activity.scheduled_time - datetime.utcnow()
     hours, remainder = divmod(time_remaining.total_seconds(), 3600)
     minutes = remainder // 60
     
-    # Create embed
     embed = discord.Embed(
         title=f"{template.name} - {activity.location}",
         description=template.description,
@@ -549,7 +443,6 @@ async def create_activity_embed(activity):
         timestamp=activity.scheduled_time
     )
     
-    # Add fields for each role
     for role, data in template.slot_definition.items():
         emoji = data.get('emoji', '')
         count = data['count']
@@ -558,7 +451,6 @@ async def create_activity_embed(activity):
         current = len(role_participants[role])
         participants_list = "\n".join(role_participants[role]) or "None"
         
-        # Show unlimited as ∞
         count_display = f"{current}/{count}" if not unlimited else f"{current}+"
         
         embed.add_field(
@@ -567,7 +459,6 @@ async def create_activity_embed(activity):
             inline=True
         )
     
-    # Add metadata
     creator = await UserService.get_user(activity.created_by)
     creator_name = creator.name if creator else "Unknown"
     
@@ -584,6 +475,20 @@ async def create_activity_embed(activity):
     )
     
     return embed
+
+# ======================
+# EVENT HANDLERS
+# ======================
+
+@bot.event
+async def on_ready():
+    if not hasattr(bot, 'presence_set'):
+        await bot.change_presence(activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="for /help"
+        ))
+        bot.presence_set = True
+        logging.info(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
 
 # ======================
 # MAIN BOT LOOP
