@@ -18,7 +18,7 @@ from services.user_service import UserService
 from rbac import admin_only
 from datetime import datetime
 
-# Initialize rich
+
 install()
 console = Console()
 logging.basicConfig(
@@ -28,7 +28,6 @@ logging.basicConfig(
     handlers=[RichHandler(console=console, show_time=False, show_path=False)]
 )
 
-# Database logging
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 intents = Intents.default()
@@ -37,7 +36,7 @@ intents.message_content = True
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix='!',  # Not used but required
+            command_prefix='!',  
             intents=intents,
             help_command=None
         )
@@ -219,14 +218,31 @@ async def createactivity(interaction: discord.Interaction, template_name: str):
             
             async def on_submit(self, interaction: discord.Interaction):
                 try:
-                    try:
-                        scheduled_time = datetime.strptime(self.time_input.value, "%Y-%m-%d %H:%M")
-                    except ValueError:
-                        await interaction.response.send_message(
-                            "❌ Invalid datetime format. Use: YYYY-MM-DD HH:MM",
-                            ephemeral=True
+                    scheduled_time = datetime.strptime(self.time_input.value, "%Y-%m-%d %H:%M")
+                    location = self.location_input.value
+                    
+                    async with AsyncSessionLocal() as session:  # NEW: Fresh session
+                        activity = await ActivityService.create_activity(
+                            template_id=template.id,
+                            scheduled_time=scheduled_time,
+                            location=location,
+                            creator_id=interaction.user.id,
+                            creator_name=interaction.user.display_name
                         )
-                        return
+                        
+                        # Generate embed WITHIN session
+                        embed = await create_activity_embed(activity)
+                        
+                        msg = await interaction.channel.send(embed=embed)
+                        await ActivityService.update_activity_message(activity.id, interaction.channel.id, msg.id)
+                        
+                        view = RoleSelectionView(activity.id, template.slot_definition)
+                        await msg.edit(view=view)
+                        
+                    await interaction.response.send_message(
+                        f"✅ Activity scheduled for {scheduled_time} in {location}",
+                        ephemeral=True
+                    )
                     
                     location = self.location_input.value
                     
